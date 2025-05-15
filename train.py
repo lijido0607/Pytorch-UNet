@@ -38,6 +38,16 @@ def train_model(
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
 ):
+    # 创建字典收集每轮指标
+    metrics_history = {
+        'epoch': [],
+        'train_loss': [],
+        'val_dice': [],
+        'val_accuracy': [],
+        'val_recall': [],
+        'val_precision': [],
+        'val_f1': []
+    }
     # 1. 创建数据集
     try:
         dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
@@ -150,9 +160,9 @@ def train_model(
                                 histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
 
                         val_score = evaluate(model, val_loader, device, amp)
-                        scheduler.step(val_score)
+                        scheduler.step(val_score['dice'])
 
-                        logging.info('Validation Dice score: {}'.format(val_score))
+                        logging.info(f'Validation Dice: {val_score["dice"]:.4f}, Accuracy: {val_score["accuracy"]:.4f}, Recall: {val_score["recall"]:.4f}')
                         try:
                             experiment.log({
                                 'learning rate': optimizer.param_groups[0]['lr'],

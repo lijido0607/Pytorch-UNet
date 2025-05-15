@@ -29,33 +29,35 @@ def train_model(
         device,
         epochs: int = 5,
         batch_size: int = 1,
-        learning_rate: float = 1e-5,
+        learning_rate: float = 1e-6,
         val_percent: float = 0.1,
         save_checkpoint: bool = True,
         img_scale: float = 0.5,
         amp: bool = True,
-        weight_decay: float = 1e-8,
+        weight_decay: float = 1e-4,
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
 ):
-    # 1. Create dataset
+    # 1. 创建数据集
     try:
         dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
     except (AssertionError, RuntimeError, IndexError):
         dataset = BasicDataset(dir_img, dir_mask, img_scale)
 
     # 2. Split into train / validation partitions
+    #2.划分训练集和验证集
     n_val = int(len(dataset) * val_percent)
     n_train = len(dataset) - n_val
     train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
 
     # 3. Create data loaders
-    # 
+    # 3.创建数据加载器
     loader_args = dict(batch_size=batch_size, num_workers=8, pin_memory=True)
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
 
     # (Initialize logging)
+    # (初始化日志记录)
     experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
     experiment.config.update(
         dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
@@ -75,14 +77,21 @@ def train_model(
     ''')
 
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
-    optimizer = optim.RMSprop(model.parameters(),
-                              lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
+    # 4.设置优化器、损失函数、学习率调度器和AMP的损失缩放
+    # optimizer = optim.RMSprop(model.parameters(),
+    #                           lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
+    # 替换优化器为AdamW
+    optimizer = optim.AdamW(model.parameters(),
+                        lr=learning_rate, 
+                        weight_decay=weight_decay,  # 增加权重衰减
+                        amsgrad=True)  # 使用AMSGrad变体提高稳定性
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
     criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
     global_step = 0
 
     # 5. Begin training
+    # 5.开始训练
     for epoch in range(1, epochs + 1):
         model.train()
         epoch_loss = 0
@@ -127,8 +136,8 @@ def train_model(
                     'epoch': epoch
                 })
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
-
                 # Evaluation round
+                # 评估轮次
                 division_step = (n_train // (5 * batch_size))
                 if division_step > 0:
                     if global_step % division_step == 0:
@@ -195,6 +204,9 @@ if __name__ == '__main__':
     # Change here to adapt to your data
     # n_channels=3 for RGB images
     # n_classes is the number of probabilities you want to get per pixel
+    # 这里根据你的数据进行更改
+    # n_channels=3表示RGB图像
+    # n_classes是你想要每个像素获得的概率数量
     model = UNet(n_channels=3, n_classes=args.classes, bilinear=args.bilinear)
     model = model.to(memory_format=torch.channels_last)
 
